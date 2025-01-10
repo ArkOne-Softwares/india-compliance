@@ -118,7 +118,7 @@ frappe.ui.form.on(DOCTYPE, {
         frm.__setup_complete = true;
 
         // Setup Listeners
-        frappe.realtime.on("is_not_latest_data", message => {
+        frappe.realtime.on("is_not_latest_gstr1_data", message => {
             const { filters } = message;
 
             const [month_or_quarter, year] =
@@ -143,7 +143,7 @@ frappe.ui.form.on(DOCTYPE, {
             );
         });
 
-        frappe.realtime.on("show_message", message => {
+        frappe.realtime.on("show_missing_gst_credentials_message", message => {
             frappe.msgprint(message);
         });
 
@@ -158,7 +158,7 @@ frappe.ui.form.on(DOCTYPE, {
         });
 
         frappe.realtime.on("gstr1_data_prepared", message => {
-            const { filters } = message;
+            const { filters, error_log } = message;
 
             if (
                 frm.doc.company_gstin !== filters.company_gstin ||
@@ -167,7 +167,17 @@ frappe.ui.form.on(DOCTYPE, {
             )
                 return;
 
-            frm.taxpayer_api_call("generate_gstr1").then(r => {
+            const only_books_data = error_log != undefined;
+            if (error_log) {
+                frappe.msgprint({
+                    message: __("Error while preparing GSTR-1 data, please check {0} for more deatils.",
+                        [`<a href='/app/error-log/${error_log}' class='variant-click'>error log</a>`]),
+                    title: "GSTR-1 Download Failed",
+                    indicator: "red",
+                });
+            }
+
+            frm.taxpayer_api_call("generate_gstr1", { only_books_data }).then(r => {
                 frm.doc.__gst_data = r.message;
                 frm.trigger("load_gstr1_data");
             });
@@ -648,7 +658,12 @@ class GSTR1 {
     }
 
     filter_detailed_view = async (fieldname, value) => {
-        await this.filter_group.push_new_filter([DOCTYPE, fieldname, "=", value]);
+        await this.filter_group.add_or_remove_filter([
+            DOCTYPE,
+            fieldname,
+            "=",
+            value.trim(),
+        ]);
         this.filter_group.apply();
     };
 
@@ -858,7 +873,7 @@ class TabManager {
         this.status = status;
         this.remove_tab_custom_buttons();
         this.setup_actions();
-        this.datatable.refresh(this.summary);
+        this.datatable.refresh(this.summary, null, this.get_no_data_message());
         this.set_default_title();
         this.set_creation_time_string();
     }
@@ -974,7 +989,7 @@ class TabManager {
                 showTotalRow: true,
                 checkboxColumn: false,
                 treeView: treeView,
-                noDataMessage: this.DEFAULT_NO_DATA_MESSAGE,
+                noDataMessage: this.get_no_data_message(),
                 headerDropdown: [
                     {
                         label: "Collapse All Node",
@@ -1018,7 +1033,6 @@ class TabManager {
                     },
                 },
             },
-            no_data_message: __("No data found"),
         });
 
         this.setup_datatable_listeners(treeView);
@@ -1170,6 +1184,10 @@ class TabManager {
         >
             <i class="fa fa-${icon}"></i>
         </button>`;
+    }
+
+    get_no_data_message() {
+        return this.DEFAULT_NO_DATA_MESSAGE;
     }
 }
 
@@ -2093,6 +2111,13 @@ class FiledTab extends GSTR1_TabManager {
             },
         ];
     }
+
+    get_no_data_message() {
+        if (this.instance.data?.is_nil)
+            return __("You have filed a Nil GSTR-1 for this period");
+
+        return this.DEFAULT_NO_DATA_MESSAGE;
+    }
 }
 
 class UnfiledTab extends FiledTab {
@@ -2111,8 +2136,6 @@ class UnfiledTab extends FiledTab {
 }
 
 class ReconcileTab extends FiledTab {
-    DEFAULT_NO_DATA_MESSAGE = __("No differences found");
-
     set_default_title() {
         if (this.instance.data.status === "Filed")
             this.DEFAULT_TITLE = "Books vs Filed";
@@ -2166,6 +2189,10 @@ class ReconcileTab extends FiledTab {
                 width: 150,
             },
         ];
+    }
+
+    get_no_data_message() {
+        return __("No differences found");
     }
 }
 
@@ -2470,10 +2497,18 @@ class FileGSTR1Dialog {
         return `
             <tr>
                 <td>${description}</td>
-                <td style="text-align: right;">${format_currency(liability.total_igst_amount)}</td>
-                <td style="text-align: right;">${format_currency(liability.total_cgst_amount)}</td>
-                <td style="text-align: right;">${format_currency(liability.total_sgst_amount)}</td>
-                <td style="text-align: right;">${format_currency(liability.total_cess_amount)}</td>
+                <td style="text-align: right;">${format_currency(
+            liability.total_igst_amount
+        )}</td>
+                <td style="text-align: right;">${format_currency(
+            liability.total_cgst_amount
+        )}</td>
+                <td style="text-align: right;">${format_currency(
+            liability.total_sgst_amount
+        )}</td>
+                <td style="text-align: right;">${format_currency(
+            liability.total_cess_amount
+        )}</td>
             </tr>
         `;
     }
@@ -2581,8 +2616,7 @@ class GSTR1Action extends FileGSTR1Dialog {
         const draft_invoices = this.frm.gstr1.data.books["Document Issued"]?.filter(
             row => row.draft_count > 0
         );
-        if (!draft_invoices?.length)
-            return upload();
+        if (!draft_invoices?.length) return upload();
 
         frappe.confirm(
             __(
@@ -2846,7 +2880,7 @@ function is_gstr1_api_enabled() {
     return (
         india_compliance.is_api_enabled() &&
         !gst_settings.sandbox_mode &&
-        gst_settings.compare_gstr_1_data
+        gst_settings.enable_gstr_1_api
     );
 }
 
@@ -2872,11 +2906,18 @@ async function set_default_company_gstin(frm) {
 
 function set_options_for_year(frm) {
     const today = new Date();
-    const current_year = today.getFullYear();
+    let current_year = today.getFullYear();
+    const current_month_idx = today.getMonth();
     const start_year = 2017;
     const year_range = current_year - start_year + 1;
     let options = Array.from({ length: year_range }, (_, index) => start_year + index);
     options = options.reverse().map(year => year.toString());
+
+    if (
+        (frm.filing_frequency === "Monthly" && current_month_idx === 0) ||
+        (frm.filing_frequency === "Quarterly" && current_month_idx < 3)
+    )
+        current_year--;
 
     frm.get_field("year").set_data(options);
     frm.set_value("year", current_year.toString());
@@ -2923,7 +2964,7 @@ function set_options_for_month_or_quarter(frm) {
     }
 
     set_field_options("month_or_quarter", options);
-    if (frm.doc.year === current_year)
+    if (frm.doc.year === current_year && options.length > 1)
         // set second last option as default
         frm.set_value("month_or_quarter", options[options.length - 2]);
     // set last option as default

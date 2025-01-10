@@ -1,6 +1,5 @@
 from datetime import date
 
-import frappe
 from frappe import parse_json, read_file
 from frappe.tests import IntegrationTestCase
 
@@ -9,9 +8,11 @@ from india_compliance.gst_india.utils.gstr_2 import GSTRCategory, save_gstr_2b
 from india_compliance.gst_india.utils.gstr_2.test_gstr_2a import TestGSTRMixin
 
 
-class TestGSTR2b(IntegrationTestCase, TestGSTRMixin):
+class TestGSTR2b(TestGSTRMixin, IntegrationTestCase):
     @classmethod
     def setUpClass(cls):
+        super().setUpClass()
+
         cls.gstin = "01AABCE2207R1Z5"
         cls.return_period = "032020"
         cls.doctype = "GST Inward Supply"
@@ -25,11 +26,6 @@ class TestGSTR2b(IntegrationTestCase, TestGSTRMixin):
             cls.return_period,
             cls.test_data,
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        frappe.db.delete(cls.doctype, {"company_gstin": cls.gstin})
-        frappe.db.delete(cls.log_doctype, {"gstin": cls.gstin})
 
     def test_gstr2b_b2b(self):
         doc = self.get_doc(GSTRCategory.B2B)
@@ -65,6 +61,7 @@ class TestGSTR2b(IntegrationTestCase, TestGSTRMixin):
                 "cgst": 0,
                 "sgst": 0,
                 "cess": 0,
+                "is_downloaded_from_2b": 1,
             },
             doc,
         )
@@ -99,6 +96,7 @@ class TestGSTR2b(IntegrationTestCase, TestGSTRMixin):
                 "cgst": 0,
                 "sgst": 0,
                 "cess": 0,
+                "is_downloaded_from_2b": 1,
             },
             doc,
         )
@@ -133,6 +131,7 @@ class TestGSTR2b(IntegrationTestCase, TestGSTRMixin):
                 "cgst": 0,
                 "sgst": 0,
                 "cess": 0,
+                "is_downloaded_from_2b": 1,
             },
             doc,
         )
@@ -165,6 +164,7 @@ class TestGSTR2b(IntegrationTestCase, TestGSTRMixin):
                 "cgst": 0,
                 "sgst": 0,
                 "cess": 0,
+                "is_downloaded_from_2b": 1,
             },
             doc,
         )
@@ -188,6 +188,7 @@ class TestGSTR2b(IntegrationTestCase, TestGSTRMixin):
                 "cgst": 200,
                 "sgst": 200,
                 "cess": 0,
+                "is_downloaded_from_2b": 1,
             },
             doc,
         )
@@ -214,6 +215,7 @@ class TestGSTR2b(IntegrationTestCase, TestGSTRMixin):
                 "cgst": 200,
                 "sgst": 200,
                 "cess": 0,
+                "is_downloaded_from_2b": 1,
             },
             doc,
         )
@@ -233,6 +235,7 @@ class TestGSTR2b(IntegrationTestCase, TestGSTRMixin):
                 "taxable_value": 123.02,
                 "igst": 123.02,
                 "cess": 0.5,
+                "is_downloaded_from_2b": 1,
             },
             doc,
         )
@@ -254,6 +257,7 @@ class TestGSTR2b(IntegrationTestCase, TestGSTRMixin):
                 "taxable_value": 123.02,
                 "igst": 123.02,
                 "cess": 0.5,
+                "is_downloaded_from_2b": 1,
             },
             doc,
         )
